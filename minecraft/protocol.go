@@ -47,6 +47,13 @@ type LegacyNetworkSettingsProtocol interface {
 	LegacyNetworkSettings() packet.Compression
 }
 
+// UnprefixedCompressionProtocol is implemented by protocols that negotiate compression through
+// NetworkSettings but whose batches have no compression algorithm byte, which is every protocol
+// from before 1.20.60.
+type UnprefixedCompressionProtocol interface {
+	UnprefixedCompression() bool
+}
+
 // EncryptionProtocol is implemented by protocols that use an encryption mode other than the current CTR mode.
 // Encryption is called independently for the encoder and decoder because each direction owns a separate counter.
 type EncryptionProtocol interface {

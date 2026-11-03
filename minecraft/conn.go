@@ -772,6 +772,20 @@ func (conn *Conn) handlePacket(pk packet.Packet) error {
 	return nil
 }
 
+// enableNegotiatedCompression enables the compression agreed on through NetworkSettings, using the
+// batch format of the protocol of the connection.
+func (conn *Conn) enableNegotiatedCompression() {
+	conn.encMu.Lock()
+	defer conn.encMu.Unlock()
+	if p, ok := conn.proto.(UnprefixedCompressionProtocol); ok && p.UnprefixedCompression() {
+		conn.enc.EnableLegacyCompression(conn.compression)
+		conn.dec.EnableLegacyCompression(conn.compression, conn.maxDecompressedLen)
+		return
+	}
+	conn.enc.EnableCompression(conn.compression, conn.compressionThreshold)
+	conn.dec.EnableCompression(conn.compression, conn.maxDecompressedLen)
+}
+
 // handleRequestNetworkSettings handles an incoming RequestNetworkSettings packet. It returns an error if the protocol
 // version is not supported, otherwise sending back a NetworkSettings packet.
 func (conn *Conn) handleRequestNetworkSettings(pk *packet.RequestNetworkSettings) error {
@@ -799,10 +813,7 @@ func (conn *Conn) handleRequestNetworkSettings(pk *packet.RequestNetworkSettings
 		return fmt.Errorf("send NetworkSettings: %w", err)
 	}
 	_ = conn.Flush()
-	conn.encMu.Lock()
-	conn.enc.EnableCompression(conn.compression, conn.compressionThreshold)
-	conn.encMu.Unlock()
-	conn.dec.EnableCompression(conn.compression, conn.maxDecompressedLen)
+	conn.enableNegotiatedCompression()
 	return nil
 }
 
@@ -813,9 +824,19 @@ func (conn *Conn) handleNetworkSettings(pk *packet.NetworkSettings) error {
 		return fmt.Errorf("unknown compression algorithm %v", pk.CompressionAlgorithm)
 	}
 	conn.encMu.Lock()
-	conn.enc.EnableCompression(alg, int(pk.CompressionThreshold))
+	unprefixed := false
+	if p, ok := conn.proto.(UnprefixedCompressionProtocol); ok && p.UnprefixedCompression() {
+		unprefixed = true
+		conn.enc.EnableLegacyCompression(alg)
+	} else {
+		conn.enc.EnableCompression(alg, int(pk.CompressionThreshold))
+	}
 	conn.encMu.Unlock()
-	conn.dec.EnableCompression(alg, conn.maxDecompressedLen)
+	if unprefixed {
+		conn.dec.EnableLegacyCompression(alg, conn.maxDecompressedLen)
+	} else {
+		conn.dec.EnableCompression(alg, conn.maxDecompressedLen)
+	}
 	conn.readyToLogin = true
 	return nil
 }
